@@ -252,6 +252,16 @@ func symbolAttachment(_ name: String, color: NSColor, pointSize: CGFloat = 12) -
     return NSAttributedString(attachment: att)
 }
 
+/// A coloured SF Symbol as a plain NSImage, for direct drawing (e.g. on the graph).
+func symbolImage(_ name: String, color: NSColor, pointSize: CGFloat = 12) -> NSImage? {
+    guard let base = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return nil }
+    let cfg = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+        .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+    let img = base.withSymbolConfiguration(cfg) ?? base
+    img.isTemplate = false
+    return img
+}
+
 /// Tidy a raw sensor name for display (e.g. "PMU tdie6" -> "tdie6").
 func displayName(_ name: String) -> String {
     name.hasPrefix("PMU ") ? String(name.dropFirst(4)) : name
@@ -259,7 +269,7 @@ func displayName(_ name: String) -> String {
 
 // MARK: - History log (last 30 min, one sample per minute, persisted)
 
-struct HistorySample { let t: Date; let die: Double?; let battery: Double?; let nand: Double? }
+struct HistorySample { let t: Date; let die: Double?; let battery: Double?; let nand: Double?; let fan: Double? }
 
 final class HistoryStore {
     private(set) var samples: [HistorySample] = []
@@ -284,16 +294,17 @@ final class HistoryStore {
             guard f.count >= 4, let epoch = Double(f[0]) else { return nil }
             let t = Date(timeIntervalSince1970: epoch)
             guard t >= cutoff else { return nil }
-            return HistorySample(t: t, die: Double(f[1]), battery: Double(f[2]), nand: Double(f[3]))
+            return HistorySample(t: t, die: Double(f[1]), battery: Double(f[2]), nand: Double(f[3]),
+                                 fan: f.count > 4 ? Double(f[4]) : nil)   // 4-col rows predate fan logging
         }
         lastLog = samples.last?.t
     }
 
     /// Record a sample, but no more than once per minute.
-    func maybeRecord(die: Double?, battery: Double?, nand: Double?, now: Date = Date()) {
+    func maybeRecord(die: Double?, battery: Double?, nand: Double?, fan: Double?, now: Date = Date()) {
         if let last = lastLog, now.timeIntervalSince(last) < minInterval { return }
         lastLog = now
-        samples.append(HistorySample(t: now, die: die, battery: battery, nand: nand))
+        samples.append(HistorySample(t: now, die: die, battery: battery, nand: nand, fan: fan))
         samples.removeAll { $0.t < now.addingTimeInterval(-window) }
         persist()
     }
@@ -301,7 +312,7 @@ final class HistoryStore {
     private func persist() {
         func f(_ v: Double?) -> String { v.map { String(format: "%.1f", $0) } ?? "" }
         let text = samples
-            .map { "\(Int($0.t.timeIntervalSince1970)),\(f($0.die)),\(f($0.battery)),\(f($0.nand))" }
+            .map { "\(Int($0.t.timeIntervalSince1970)),\(f($0.die)),\(f($0.battery)),\(f($0.nand)),\(f($0.fan))" }
             .joined(separator: "\n")
         try? text.write(to: url, atomically: true, encoding: .utf8)
     }
@@ -357,6 +368,10 @@ final class PanelView: NSView {
         let w = (s as NSString).size(withAttributes: attrs).width
         (s as NSString).draw(at: NSPoint(x: rightX - w, y: y), withAttributes: attrs)
     }
+    /// Draw an image upright inside this flipped view.
+    private func drawImage(_ img: NSImage, in r: NSRect) {
+        img.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         let labelFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -397,8 +412,18 @@ final class PanelView: NSView {
         row("NAND (SSD)",  temp(data.summary.nand))
         y += gap
 
-        // TREND
-        header("Trend · last 30 min")
+        // TREND (header carries a right-aligned "fan on" key)
+        let trendY = y
+        draw("TREND · LAST 30 MIN", headerFont, .secondaryLabelColor, at: NSPoint(x: padX, y: trendY + 5))
+        if let icon = symbolImage("fanblades", color: .systemOrange, pointSize: 11) {
+            let keyFont = NSFont.systemFont(ofSize: 11, weight: .regular)
+            let keyText = "fan on"
+            let tw = (keyText as NSString).size(withAttributes: [.font: keyFont]).width
+            let ix = rightX - tw - icon.size.width - 4
+            drawImage(icon, in: NSRect(x: ix, y: trendY + 4, width: icon.size.width, height: icon.size.height))
+            draw(keyText, keyFont, .secondaryLabelColor, at: NSPoint(x: ix + icon.size.width + 4, y: trendY + 5))
+        }
+        y += headerH
         drawGraph(in: NSRect(x: padX, y: y, width: width - 2 * padX, height: graphH))
         y += graphH
         drawLegend(at: y)
@@ -446,6 +471,25 @@ final class PanelView: NSView {
                       rightX: plot.minX - 5, y: gy - 6)
         }
 
+        // Fan-on periods: faint orange band behind the series; icon drawn after.
+        let fanColor = NSColor.systemOrange
+        var fanIconCenters: [CGFloat] = []
+        var spanStart: Date?
+        var spanEnd: Date?
+        func closeFanSpan() {
+            guard let s0 = spanStart, let s1 = spanEnd else { return }
+            let x0 = x(s0), x1 = max(x(s1), x0 + 3)
+            fanColor.withAlphaComponent(0.13).setFill()
+            NSBezierPath(rect: NSRect(x: x0, y: plot.minY, width: x1 - x0, height: plot.height)).fill()
+            fanIconCenters.append((x0 + x1) / 2)
+            spanStart = nil; spanEnd = nil
+        }
+        for s in data.history {
+            if (s.fan ?? 0) > 0 { if spanStart == nil { spanStart = s.t }; spanEnd = s.t }
+            else { closeFanSpan() }
+        }
+        closeFanSpan()
+
         // Time labels (30m ago … now).
         draw("30m", smallFont, .tertiaryLabelColor, at: NSPoint(x: plot.minX, y: plot.maxY + 4))
         drawRight("now", smallFont, .tertiaryLabelColor, rightX: plot.maxX, y: plot.maxY + 4)
@@ -465,6 +509,14 @@ final class PanelView: NSView {
         line({ $0.die }, dieColor)
         line({ $0.battery }, batteryColor)
         line({ $0.nand }, nandColor)
+
+        // Fan icon centred over each on-period (drawn last, on top).
+        if let icon = symbolImage("fanblades", color: fanColor, pointSize: 11) {
+            for cx in fanIconCenters {
+                drawImage(icon, in: NSRect(x: cx - icon.size.width / 2, y: plot.minY + 2,
+                                           width: icon.size.width, height: icon.size.height))
+            }
+        }
     }
 
     private func drawLegend(at yTop: CGFloat) {
@@ -517,7 +569,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func recordSample() {
         let s = summarize(readThermalSensors())
-        history.maybeRecord(die: s.averageDie, battery: s.battery, nand: s.nand)
+        let fanRPM = (smc?.fans() ?? []).map(\.rpm).max().map(Double.init)
+        history.maybeRecord(die: s.averageDie, battery: s.battery, nand: s.nand, fan: fanRPM)
     }
 
     /// Lightweight tick: refresh only the menu bar title (safe while the menu is open).
@@ -579,10 +632,12 @@ if let i = CommandLine.arguments.firstIndex(of: "--render"), i + 1 < CommandLine
     var hist: [HistorySample] = []
     for k in stride(from: 30, through: 0, by: -1) {
         let w = Double(30 - k)
+        let fanOn = (w >= 8 && w <= 14) || w >= 23   // two demo on-periods
         hist.append(HistorySample(t: now.addingTimeInterval(TimeInterval(-k * 60)),
                                   die: baseDie + sin(w / 3) * 6 + w * 0.25,
                                   battery: baseBat + sin(w / 5) * 1.5,
-                                  nand: baseNand + cos(w / 4) * 1.2))
+                                  nand: baseNand + cos(w / 4) * 1.2,
+                                  fan: fanOn ? 1600 : 0))
     }
     let panel = PanelView(data: .init(fans: fans, summary: s, history: hist))
     let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
