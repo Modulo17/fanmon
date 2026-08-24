@@ -1,21 +1,27 @@
 # fanmon
 
+> This started as a side project when my M5 suddenly got very hot and kept
+> sleeping quicker than I could see what was making it sleep — now I get a
+> warning first.
+
 A tiny native macOS **menu bar** widget that shows live temperature and fan RPM
 for Apple Silicon Macs (built and tested on an M5 Max).
 
-**Menu bar title:** a thermometer + the headline temperature + a fan glyph + RPM,
-e.g. `🌡 49°  ✼ 1462`. The thermometer and temperature are colour-coded by heat:
+**Menu bar title:** a thermometer + the headline temperature, e.g. `🌡 49°`
+(kept compact — fan speeds live in the dropdown). The thermometer and
+temperature are colour-coded by heat:
 
-| State | Temp      | Colour           |
-|-------|-----------|------------------|
-| cool  | < 70 °C   | neutral (passive)|
-| warm  | 70–89 °C  | orange           |
-| hot   | ≥ 90 °C   | red              |
+| State | Temp      | Colour            |
+|-------|-----------|-------------------|
+| cool  | < 70 °C   | neutral (passive) |
+| warm  | 70–89 °C  | orange            |
+| hot   | ≥ 90 °C   | red               |
 
-The **headline** temperature is the hottest of the die / battery / NAND(SSD).
+The **headline** temperature is the hottest of the die / battery / NAND (SSD).
 
 **Click** it for a compact panel (full-strength text, custom-drawn — no per-die
-noise), ending in a 30-minute trend graph of die-average, battery, and NAND:
+noise), ending in a 30-minute trend graph of die-average, battery, and NAND.
+Periods when a fan was running are marked with an orange band and a fan icon:
 
 ```
 FANS
@@ -26,8 +32,8 @@ TEMPERATURES
   Average die                       38.7 °C
   Battery                           34.3 °C
   NAND (SSD)                        35.0 °C
-TREND · LAST 30 MIN
-  [ line graph: Die / Battery / NAND over the last 30 min ]
+TREND · LAST 30 MIN                        ✼ fan on
+  [ Die / Battery / NAND lines; orange bands mark fan-on periods ]
 ```
 
 ## History log
@@ -47,6 +53,11 @@ directly — **no `sudo`, no kernel extension, no entitlements**:
   temps come through `IOHIDServiceClientCopyEvent`. Note the client must be made
   with the private `IOHIDEventSystemClientCreate` — the public
   `CreateSimpleClient` enumerates sensors but never delivers readings.
+
+Nothing is hardcoded to a particular chip: fan count and sensors are discovered
+at runtime, so it works across Apple Silicon (M1–M5). Fans are also readable on
+Intel Macs, but temperatures there use a different (SMC) path that isn't
+implemented here.
 
 ## Build
 
@@ -68,13 +79,43 @@ Or print a one-shot reading to the terminal without the menu bar:
 ./build/Fanmon.app/Contents/MacOS/fanmon --dump
 ```
 
+## Customising the bundle identifier
+
+The bundle ID is a neutral placeholder, `com.example.fanmon`. To rebrand it to
+your own reverse-DNS domain, edit `BUNDLE_ID` at the top of `build.sh`. If you
+install a login agent (below), give the agent's `Label` the **same** value.
+
 ## Start automatically at login
 
-System Settings → General → Login Items → **＋** → select `build/Fanmon.app`.
-(Move the app somewhere permanent, like `/Applications`, first.)
+Move the app somewhere permanent first (e.g. symlink it into `/Applications`):
+
+```bash
+ln -sfn "$PWD/build/Fanmon.app" /Applications/Fanmon.app
+```
+
+**Simple:** System Settings → General → Login Items → **＋** → select the app.
+
+**Robust (auto-restart on crash):** create
+`~/Library/LaunchAgents/<BUNDLE_ID>.plist` with `Label` = your `BUNDLE_ID`,
+`ProgramArguments` = `[/Applications/Fanmon.app/Contents/MacOS/fanmon]`,
+`RunAtLoad` = true, and `KeepAlive` = `{ SuccessfulExit = false }` (so a manual
+Quit is respected). Load it with:
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<BUNDLE_ID>.plist
+```
 
 ## Files
 
 - `Sources/main.swift` — SMC reader, thermal reader, and the menu bar app.
 - `bridge/fanmon-bridge.h` — declares the private IOKit symbols + SMC structs.
 - `build.sh` — compiles and assembles the `.app` bundle.
+- `LICENSE` — MIT.
+
+## Diagnostics
+
+```bash
+fanmon --dump                 # one-shot text reading
+fanmon --render <png> [--dark] # render the panel to an image
+fanmon --render-title <png>    # preview the menu bar title states
+```

@@ -551,7 +551,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ note: Notification) {
         // Persist the item's position so it returns to where you put it after every
         // relaunch/rebuild (instead of defaulting back to the notch-adjacent slot).
-        statusItem.autosaveName = "com.modulo17.fanmon"
+        statusItem.autosaveName = "fanmon"
 
         let menu = NSMenu()
         menu.delegate = self          // contents rebuilt on demand in menuNeedsUpdate(_:)
