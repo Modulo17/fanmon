@@ -7,3 +7,7 @@ build/
 # Release artifacts
 fanmon-*.tar.gz
 SHA256SUMS
+
+# Signing / release (local only)
+packaging/release.env
+*.dmg

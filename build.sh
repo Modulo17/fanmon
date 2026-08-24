@@ -3,10 +3,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Reverse-DNS bundle identifier. This is a neutral placeholder — to rebrand,
-# change it to your own domain (e.g. com.yourname.fanmon). It must match the
-# LaunchAgent Label if you install one (see README → "Start automatically").
-BUNDLE_ID="com.example.fanmon"
+# Reverse-DNS bundle identifier. Neutral placeholder by default; override via the
+# BUNDLE_ID environment variable (e.g. for signed releases — see packaging/).
+# It must match the LaunchAgent Label if you install one (README → "Start automatically").
+BUNDLE_ID="${BUNDLE_ID:-com.example.fanmon}"
 
 APP="build/Fanmon.app"
 MACOS="$APP/Contents/MacOS"

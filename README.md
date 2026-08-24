@@ -71,8 +71,20 @@ to get them without `sudo`). Consequences: it can't ship on the Mac App Store,
 and a future macOS could change those symbols — in which case it degrades
 gracefully (shows no temperatures) rather than breaking.
 
-Because there are no signed release binaries, the safest way to install is to
-**build it yourself from source** (below) — you run only code you can read.
+Two safe ways to install: **download the notarized release** (signed with a
+Developer ID and checked by Apple), or **build it yourself from source** — where
+you run only code you can read.
+
+## Install
+
+- **Notarized download:** grab `Fanmon-<version>.dmg` from the
+  [latest release](https://github.com/Modulo17/fanmon/releases/latest), open it,
+  and drag **Fanmon** into Applications. It's Developer-ID-signed and notarized,
+  so it opens without Gatekeeper warnings. Verify it with
+  `shasum -a 256 -c SHA256SUMS` if you like.
+- **From source:** see [Build](#build) below. (The open-source build uses the
+  placeholder bundle id `com.example.fanmon`; the notarized download uses the
+  maintainer's own.)
 
 ## Requirements
 
@@ -128,11 +140,20 @@ Quit is respected). Load it with:
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<BUNDLE_ID>.plist
 ```
 
+## Releasing (maintainer)
+
+`packaging/release.sh <version>` builds, Developer-ID-signs (Hardened Runtime),
+notarizes, and staples both the `.app` and a `.dmg`. Configure signing in
+`packaging/release.env` (copy from `packaging/release.env.example` — it's
+gitignored). Requires a Developer ID Application certificate and an App Store
+Connect API key.
+
 ## Files
 
 - `Sources/main.swift` — SMC reader, thermal reader, and the menu bar app.
 - `bridge/fanmon-bridge.h` — declares the private IOKit symbols + SMC structs.
 - `build.sh` — compiles and assembles the `.app` bundle.
+- `packaging/` — Developer ID signing + notarization release pipeline.
 - `LICENSE` — MIT.
 
 ## Diagnostics
