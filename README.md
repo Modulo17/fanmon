@@ -7,7 +7,8 @@
 A tiny native macOS **menu bar** widget that shows live temperature and fan RPM
 for Apple Silicon Macs (built and tested on an M5 Max).
 
-![fanmon in action — the die heats up, the reading turns red, and the fan spins up (orange band on the trend)](docs/demo.gif)
+<img src="docs/demo.gif" alt="fanmon in action — the die heats up, the reading turns red, and the fan spins up (orange band on the trend)" width="340">
+
 
 **Menu bar title:** a thermometer + the headline temperature, e.g. `🌡 49°`
 (kept compact — fan speeds live in the dropdown). The thermometer and

@@ -622,28 +622,37 @@ if CommandLine.arguments.contains("--dump") {
     exit(0)
 }
 
-// Render the panel to a flat CGImage (background composited in) at 1× scale.
-func renderPanel(_ data: PanelView.Data, dark: Bool) -> CGImage? {
+// Render the panel to a flat CGImage (background composited in) at Retina 2×,
+// so it stays crisp when a browser displays it at logical width.
+func renderPanel(_ data: PanelView.Data, dark: Bool, scale: CGFloat = 2) -> CGImage? {
     let panel = PanelView(data: data)
     let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
     panel.appearance = appearance
-    let content = panel.bitmapImageRepForCachingDisplay(in: panel.bounds)!
+    let size = panel.bounds.size
+
+    func rep2x() -> NSBitmapImageRep? {
+        let r = NSBitmapImageRep(bitmapDataPlanes: nil,
+                                 pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                 bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        r?.size = size            // logical size ⇒ context renders at `scale`
+        return r
+    }
+
+    // 1) Cache the (transparent) view at 2×.
+    guard let content = rep2x() else { return nil }
     appearance.performAsCurrentDrawingAppearance {   // resolve semantic colours correctly
         panel.cacheDisplay(in: panel.bounds, to: content)
     }
-    let size = panel.bounds.size
-    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width),
-                                     pixelsHigh: Int(size.height), bitsPerSample: 8, samplesPerPixel: 4,
-                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-                                     bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
-    rep.size = size
+    // 2) Composite over an opaque background, also at 2×.
+    guard let out = rep2x() else { return nil }
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: out)
     (dark ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.98, alpha: 1)).setFill()
     NSBezierPath(rect: panel.bounds).fill()
     content.draw(in: panel.bounds)
     NSGraphicsContext.restoreGraphicsState()
-    return rep.cgImage
+    return out.cgImage
 }
 
 // A minute-by-minute heat event used by the preview/GIF: idle → hot → cooling,
