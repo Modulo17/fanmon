@@ -7,6 +7,8 @@
 
 import Cocoa
 import IOKit
+import ImageIO
+import UniformTypeIdentifiers
 
 // MARK: - SMC (fans)
 
@@ -620,42 +622,102 @@ if CommandLine.arguments.contains("--dump") {
     exit(0)
 }
 
-// `fanmon --render <png> [--dark]` draws the popover panel to an image (with a
-// synthesized 30-min history) — a headless way to preview the menu layout/graph.
+// Render the panel to a flat CGImage (background composited in) at 1× scale.
+func renderPanel(_ data: PanelView.Data, dark: Bool) -> CGImage? {
+    let panel = PanelView(data: data)
+    let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
+    panel.appearance = appearance
+    let content = panel.bitmapImageRepForCachingDisplay(in: panel.bounds)!
+    appearance.performAsCurrentDrawingAppearance {   // resolve semantic colours correctly
+        panel.cacheDisplay(in: panel.bounds, to: content)
+    }
+    let size = panel.bounds.size
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width),
+                                     pixelsHigh: Int(size.height), bitsPerSample: 8, samplesPerPixel: 4,
+                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                     bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+    rep.size = size
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    (dark ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.98, alpha: 1)).setFill()
+    NSBezierPath(rect: panel.bounds).fill()
+    content.draw(in: panel.bounds)
+    NSGraphicsContext.restoreGraphicsState()
+    return rep.cgImage
+}
+
+// A minute-by-minute heat event used by the preview/GIF: idle → hot → cooling,
+// with the fan spinning up once the die passes ~68 °C.
+func demoTimeline() -> [(die: Double, battery: Double, nand: Double, fan: Double)] {
+    (0...30).map { k in
+        let m = Double(k)
+        let die: Double
+        switch m {
+        case ..<6:   die = 40
+        case ..<16:  die = 40 + (m - 6) / 10 * 56      // 40 → 96
+        case ..<22:  die = 96 - (m - 16) * 0.6
+        default:     die = 92 - (m - 22) / 8 * 40      // → 52
+        }
+        let fan = die >= 68 ? min(5200, 1400 + (die - 68) * 95) : 0
+        return (die, 33 + m * 0.1, 34 + sin(m / 3) * 1.2, fan)
+    }
+}
+
+// `fanmon --render <png> [--dark]` draws the popover panel to an image (final
+// frame of the demo timeline) — a headless way to preview the menu layout/graph.
 if let i = CommandLine.arguments.firstIndex(of: "--render"), i + 1 < CommandLine.arguments.count {
     let path = CommandLine.arguments[i + 1]
     let dark = CommandLine.arguments.contains("--dark")
-    let s = summarize(readThermalSensors())
-    let fans = SMC()?.fans() ?? []
     let now = Date()
-    let baseDie = s.averageDie ?? 45, baseBat = s.battery ?? 34, baseNand = s.nand ?? 35
-    var hist: [HistorySample] = []
-    for k in stride(from: 30, through: 0, by: -1) {
-        let w = Double(30 - k)
-        let fanOn = (w >= 8 && w <= 14) || w >= 23   // two demo on-periods
-        hist.append(HistorySample(t: now.addingTimeInterval(TimeInterval(-k * 60)),
-                                  die: baseDie + sin(w / 3) * 6 + w * 0.25,
-                                  battery: baseBat + sin(w / 5) * 1.5,
-                                  nand: baseNand + cos(w / 4) * 1.2,
-                                  fan: fanOn ? 1600 : 0))
+    let tl = demoTimeline()
+    let hist = tl.enumerated().map { k, p in
+        HistorySample(t: now.addingTimeInterval(TimeInterval(-(tl.count - 1 - k) * 60)),
+                      die: p.die, battery: p.battery, nand: p.nand, fan: p.fan)
     }
-    let panel = PanelView(data: .init(fans: fans, summary: s, history: hist))
-    let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
-    panel.appearance = appearance
-    let rep = panel.bitmapImageRepForCachingDisplay(in: panel.bounds)!
-    appearance.performAsCurrentDrawingAppearance {   // resolve semantic colours correctly
-        panel.cacheDisplay(in: panel.bounds, to: rep)
+    let cur = tl[tl.count / 2]   // a hot mid-point, for a lively still
+    let summary = ThermalSummary(hottestDie: cur.die, averageDie: cur.die - 1, battery: cur.battery,
+                                 nand: cur.nand, hottest: cur.die, dies: [], others: [])
+    let fans = [SMC.Fan(index: 0, rpm: Int(cur.fan), min: 1350, max: 5349, target: Int(cur.fan)),
+                SMC.Fan(index: 1, rpm: Int(cur.fan * 1.03), min: 1350, max: 5777, target: Int(cur.fan * 1.03))]
+    if let cg = renderPanel(.init(fans: fans, summary: summary, history: hist), dark: dark),
+       let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL,
+                                                  UTType.png.identifier as CFString, 1, nil) {
+        CGImageDestinationAddImage(dest, cg, nil)
+        CGImageDestinationFinalize(dest)
     }
+    exit(0)
+}
 
-    let out = NSImage(size: panel.bounds.size)
-    out.lockFocus()
-    (dark ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.98, alpha: 1)).setFill()
-    NSBezierPath(rect: panel.bounds).fill()
-    rep.draw(in: panel.bounds)
-    out.unlockFocus()
-    if let tiff = out.tiffRepresentation, let b = NSBitmapImageRep(data: tiff),
-       let png = b.representation(using: .png, properties: [:]) {
-        try? png.write(to: URL(fileURLWithPath: path))
+// `fanmon --render-gif <gif>` animates the demo heat event as a looping GIF.
+if let i = CommandLine.arguments.firstIndex(of: "--render-gif"), i + 1 < CommandLine.arguments.count {
+    let path = CommandLine.arguments[i + 1]
+    let now = Date()
+    let tl = demoTimeline()
+    var frames: [CGImage] = []
+    for end in 0..<tl.count {
+        let hist = (0...end).map { k in
+            HistorySample(t: now.addingTimeInterval(TimeInterval(-(tl.count - 1 - k) * 60)),
+                          die: tl[k].die, battery: tl[k].battery, nand: tl[k].nand, fan: tl[k].fan)
+        }
+        let cur = tl[end]
+        let summary = ThermalSummary(hottestDie: cur.die, averageDie: cur.die - 1, battery: cur.battery,
+                                     nand: cur.nand, hottest: cur.die, dies: [], others: [])
+        let fans = [SMC.Fan(index: 0, rpm: Int(cur.fan), min: 1350, max: 5349, target: Int(cur.fan)),
+                    SMC.Fan(index: 1, rpm: Int(cur.fan * 1.03), min: 1350, max: 5777, target: Int(cur.fan * 1.03))]
+        if let cg = renderPanel(.init(fans: fans, summary: summary, history: hist), dark: false) {
+            frames.append(cg)
+        }
+    }
+    if let last = frames.last { frames.append(contentsOf: [last, last, last]) }  // hold on the end
+    if let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL,
+                                                  UTType.gif.identifier as CFString, frames.count, nil) {
+        CGImageDestinationSetProperties(dest, [kCGImagePropertyGIFDictionary:
+            [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+        for cg in frames {
+            CGImageDestinationAddImage(dest, cg, [kCGImagePropertyGIFDictionary:
+                [kCGImagePropertyGIFDelayTime: 0.14]] as CFDictionary)
+        }
+        CGImageDestinationFinalize(dest)
     }
     exit(0)
 }

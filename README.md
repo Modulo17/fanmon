@@ -7,6 +7,8 @@
 A tiny native macOS **menu bar** widget that shows live temperature and fan RPM
 for Apple Silicon Macs (built and tested on an M5 Max).
 
+![fanmon in action — the die heats up, the reading turns red, and the fan spins up (orange band on the trend)](docs/demo.gif)
+
 **Menu bar title:** a thermometer + the headline temperature, e.g. `🌡 49°`
 (kept compact — fan speeds live in the dropdown). The thermometer and
 temperature are colour-coded by heat:
@@ -23,18 +25,10 @@ The **headline** temperature is the hottest of the die / battery / NAND (SSD).
 noise), ending in a 30-minute trend graph of die-average, battery, and NAND.
 Periods when a fan was running are marked with an orange band and a fan icon:
 
-```
-FANS
-  Fan 1                     1347 rpm   25%
-  Fan 2                     1460 rpm   25%
-TEMPERATURES
-  Hottest die                       39.6 °C
-  Average die                       38.7 °C
-  Battery                           34.3 °C
-  NAND (SSD)                        35.0 °C
-TREND · LAST 30 MIN                        ✼ fan on
-  [ Die / Battery / NAND lines; orange bands mark fan-on periods ]
-```
+<img src="docs/panel.png" alt="fanmon dropdown panel: fans, temperatures, and a 30-minute trend graph with a fan-on band" width="340">
+
+_(GIFs/screenshots above are generated headlessly from the real drawing code —
+see `--render` / `--render-gif` under [Diagnostics](#diagnostics).)_
 
 ## History log
 
@@ -115,7 +109,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<BUNDLE_ID>.plist
 ## Diagnostics
 
 ```bash
-fanmon --dump                 # one-shot text reading
-fanmon --render <png> [--dark] # render the panel to an image
-fanmon --render-title <png>    # preview the menu bar title states
+fanmon --dump                  # one-shot text reading
+fanmon --render <png> [--dark]  # render the panel to an image
+fanmon --render-gif <gif>       # render the animated demo (used in this README)
+fanmon --render-title <png>     # preview the menu bar title states
 ```
