@@ -3,3 +3,7 @@ build/
 
 # macOS
 .DS_Store
+
+# Release artifacts
+fanmon-*.tar.gz
+SHA256SUMS
