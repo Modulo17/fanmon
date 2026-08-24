@@ -54,6 +54,34 @@ at runtime, so it works across Apple Silicon (M1–M5). Fans are also readable o
 Intel Macs, but temperatures there use a different (SMC) path that isn't
 implemented here.
 
+## Safety & privacy
+
+fanmon is **monitor-only** and built to be safe to run:
+
+- **Read-only.** It reads temperature and fan sensors. It does **not** control
+  fan speed or write anything to hardware, so it cannot damage your Mac.
+- **No elevated privileges.** No `sudo`, no kernel extension, no entitlements.
+- **No network, no telemetry.** Nothing leaves your machine. The only file it
+  writes is a local history log at
+  `~/Library/Application Support/fanmon/history.csv`.
+- **Open source, MIT-licensed**, provided "as is" without warranty.
+
+It uses a private Apple API to read Apple Silicon thermal sensors (the only way
+to get them without `sudo`). Consequences: it can't ship on the Mac App Store,
+and a future macOS could change those symbols — in which case it degrades
+gracefully (shows no temperatures) rather than breaking.
+
+Because there are no signed release binaries, the safest way to install is to
+**build it yourself from source** (below) — you run only code you can read.
+
+## Requirements
+
+- **Run:** macOS 13 (Ventura) or later, Apple Silicon (M1–M5).
+- **Build:** Xcode 26 / the macOS 26 SDK or newer — the IOKit HID thermal
+  declarations used here are public as of that SDK. Older SDKs may not compile
+  without re-adding the private declarations. (`xcode-select --install` gives you
+  the Command Line Tools.)
+
 ## Build
 
 ```bash
