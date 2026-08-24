@@ -114,6 +114,16 @@ Or print a one-shot reading to the terminal without the menu bar:
 ./build/Fanmon.app/Contents/MacOS/fanmon --dump
 ```
 
+## Checks
+
+Run a local build + smoke test any time — it compiles with warnings-as-errors,
+then exercises `--dump` and `--render`. It builds in a temp dir, so it won't
+touch `build/` or a running instance (no network, no signing, no CI):
+
+```bash
+./check.sh
+```
+
 ## Customising the bundle identifier
 
 The bundle ID is a neutral placeholder, `com.example.fanmon`. To rebrand it to
